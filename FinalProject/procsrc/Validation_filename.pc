@@ -1,0 +1,157 @@
+#include"GlobalsAndStructures.h"
+#include"Validation_filename.h"
+#include"helper_functions.h"
+#include<string.h>
+#include<ctype.h>
+#include<stdlib.h>
+
+static int isExtensionValid(const char* extension) 
+{
+	char cValidExtesion[5] = {".txt"};
+	
+	if(!strcmp(extension, cValidExtesion))
+	{
+		log_msg("Filename extension is valid", e_file_manager);
+			return 1;
+	}
+	else
+	{
+		log_err("Filename extension not valid", e_file_manager_err);
+		return 0;
+	}
+}
+static int isFilenameTimeFormatValid(const char* timeStr) 
+{
+	int iHours = 0;
+	int iMinutes = 0;
+	int iSeconds = 0;
+	int n = sscanf(timeStr, "%2d%2d%2d", &iHours, &iMinutes, &iSeconds);
+	
+	int i;
+	for (i = 0; i < TIME_SIZE - 1; i++)
+	{
+		if (!isdigit(timeStr[i]))
+		{
+			log_err("Time in filename not valid", e_file_manager_err);
+			return 0;
+		}
+	}
+	
+	if (iHours < 0 || iHours > 23)
+	{
+		return 0;
+	}
+	if (iMinutes < 0 || iMinutes > 59)
+	{
+		return 0;
+	}
+	if (iSeconds < 0 || iSeconds > 59) 
+	{
+		return 0;
+	}
+
+	return 1;
+}
+static int isFilenameDateFormatValid(const char* dateStr)
+{
+	int iYear = 0;
+	int iDay = 0; 
+	int iMonth = 0;
+
+    int i;
+	for (i = 0; i < DATE_SIZE - 1; i++)
+	{
+		if (!isdigit(dateStr[i]))
+		{
+			log_err("Date in filename not valid", e_file_manager_err);
+			return 0;
+		}
+	}
+
+	int n = sscanf(dateStr, "%4d%2d%2d", &iYear, &iMonth, &iDay);
+	
+	if (iDay < 1 || iDay > 31)
+	{
+		log_err("Date day in filename not valid", e_file_manager_err);
+		return 0;
+	}
+	if (iMonth < 1 || iMonth > 12 || iMonth == 2)
+	{
+		if (iDay > 29) {
+			log_err("Date day in filename not valid", e_file_manager_err);
+			return 0;
+		}
+		if (iMonth < 1 || iMonth > 12)
+		{
+		    log_err("Date month in filename not valid", e_file_manager_err);
+			return 0;
+		}
+	}
+	if (iYear < 1900 || iYear > 9999)
+	{
+		log_err("Date year in filename not valid", e_file_manager_err);
+		return 0;
+	}
+
+	int maxDaysMonth[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+
+	if ((iMonth == 2) && (iYear % 4 == 0) && ((iYear % 100 != 0) || (iYear % 400 == 0)))
+	{
+		maxDaysMonth[1] = 29;
+	}
+
+	if (iDay > maxDaysMonth[iMonth - 1])
+	{
+		log_err("Date month in filename not valid", e_file_manager_err);
+		return 0;
+	}
+	
+	log_msg("Date in filename is valid", e_file_manager);
+	return 1;
+}
+
+int isFilenameValid(const char* fileName)
+{
+	char prefix[50] = "IMP_CUSTOMER_DATA_";
+	char Buffer[100]; 
+	char dateStr[DATE_SIZE] = "\0";
+	char timeStr[TIME_SIZE] = "\0";
+	char extension[EXTENTION_LEN] = "\0";
+	
+	strcpy(Buffer, fileName);
+	
+	if (strncmp(Buffer, prefix, strlen(prefix)) == 0)
+	{
+		strncpy(dateStr, &fileName[LEN_FILE_NAME], DATE_SIZE - 1);
+		strncpy(timeStr, &fileName[LEN_FILE_NAME + DATE_SIZE - 1], TIME_SIZE - 1);
+		strncpy(extension, &fileName[LEN_FILE_NAME + DATE_SIZE - 1 + TIME_SIZE - 1], EXTENTION_LEN);
+		
+		int iLenDateStr = strlen(dateStr);
+		if (iLenDateStr > DATE_SIZE - 1 || iLenDateStr < DATE_SIZE - 1) {
+			log_err("Date format in filename not valid", e_file_manager_err);
+			return 0;
+		}
+
+		int iLenTimeStr = strlen(timeStr);
+		if (iLenTimeStr > TIME_SIZE - 1 || iLenDateStr < TIME_SIZE - 1)
+		{
+			log_err("Time format in filename not valid", e_file_manager_err);
+			return 0;
+		}
+		
+		int iResultDate = isFilenameDateFormatValid(dateStr);
+		int iResultTime = isFilenameTimeFormatValid(timeStr);
+		int iResultExt = isExtensionValid(extension);
+
+		if (iResultDate && iResultTime && iResultExt) 
+		{
+			log_msg("Time format in filename is valid", e_file_manager);
+			return 1;
+		}
+	}
+	
+	return 0;
+}
+
+
+

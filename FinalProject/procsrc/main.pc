@@ -1,0 +1,59 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <time.h>
+#include"FileManager.h"
+#include"helper_functions.h"
+#include"add_interest_batch.h"
+#include"process_overpayments.h"
+#include "report.h"
+
+
+#define BUFSIZE 96
+
+EXEC SQL BEGIN DECLARE SECTION;
+
+char szUserId[164] = "SILVET_PULENOVA/dbpass@83.228.124.173:6223/SILVET_PULENOVA";
+char szStatement[256] = { 0 };
+int g_iValue = 0;
+char g_szValue[64] = { 0 };
+char g_szDate[64] = { 0 };
+short szValueInd = -1;
+varchar result[64] = { 0 };
+char szExtreference[65] = { 0 };
+
+EXEC SQL END DECLARE SECTION;
+
+
+int main(void)
+{
+	EXEC SQL CONNECT : szUserId;
+    printf("Connected.\n");
+	
+	createDirs();
+	
+	open_log_files();
+	
+	scanDir();
+	
+	process_overpayments("EXT8");
+	
+	add_interest("EXT8");
+	
+	EXEC SQL CALL update_invoice_due_date();
+	
+	generate_report("client");
+	
+	close_log_files();
+	
+	EXEC SQL COMMIT WORK RELEASE;
+ 
+	return 0;
+}
+
+
+

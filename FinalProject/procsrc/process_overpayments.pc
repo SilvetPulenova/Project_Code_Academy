@@ -1,0 +1,178 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <time.h>
+#include"helper_functions.h"
+EXEC SQL INCLUDE process_overpayments.h;
+
+void insert_payment_by_invoice(Str_over_payments* payment, char* invoice_no) {
+    
+	int seq_payment = 0;
+
+    EXEC SQL SELECT payments_seq.nextval INTO :seq_payment FROM PAYMENTS;
+	
+     EXEC SQL INSERT INTO PAYMENTS
+	(
+	  INVOICE_NO,
+	  PAYMENT_ID,	
+		AMOUNT) 
+		VALUES
+	(:invoice_no,
+	 :seq_payment,
+     :payment->m_amount);
+	 
+	 log_msg("Insert payment for not paid invoice\n",e_process_overpayments);
+}
+void delete_from_overpayment(char* paymentId) {
+   
+	EXEC SQL WHENEVER SQLERROR do sql_error("Oracle error");
+
+	EXEC SQL DELETE FROM OVER_PAYMENTS
+	WHERE ORIGINAL_PAYMENT_ID =: paymentId;
+	
+	log_msg("Row from over_payments is deleted\n", e_process_overpayments);
+	sql_Commit1();
+}
+void sql_Commit1() 
+{
+  (void)sqlstm;
+
+  EXEC SQL CONTEXT USE DEFAULT;
+  EXEC SQL WHENEVER SQLERROR do sql_error("Oracle error"); 
+
+  EXEC SQL COMMIT; 
+  if (0 == sqlca.sqlcode) 
+  {
+    log_msg("\nCommited.\n", e_process_overpayments);
+  }
+}
+void process_overpayments(char* external_ref) 
+{
+	int internal_ref = 0;
+	int num_rows_over_payment = 0;
+	int num_rows_invoice = 0;
+	
+    internal_ref = return_customerId(external_ref);
+	//EXEC SQL WHENEVER SQLERROR do sql_error("Oracle error");
+	
+	if(internal_ref > 0)
+	{
+		Str_over_payments overPayments;
+		S_Invoices result_invoice;
+		
+		EXEC SQL DECLARE my_payments CURSOR FOR
+		SELECT ov.payment_id, ov.amount, i.inv_no
+		FROM over_payments ov, payments p, invoices i
+		WHERE p.payment_id = ov.original_payment_id and i.inv_no = p.invoice_no
+	    and i.customer_id = :internal_ref and i.amount_due > 0;
+		
+		EXEC SQL DECLARE my_invoice_no CURSOR FOR
+		SELECT inv_no, amount, amount_due
+		FROM invoices
+		WHERE customer_id = :internal_ref and amount_due > 0;
+		
+		EXEC SQL SELECT COUNT(*) INTO :num_rows_over_payment                                                     
+		FROM over_payments ov, payments p, invoices i
+		WHERE p.payment_id = ov.original_payment_id and i.inv_no = p.invoice_no
+		and i.customer_id = :internal_ref;
+		
+		EXEC SQL SELECT COUNT (*) INTO :num_rows_invoice
+		FROM invoices
+		WHERE customer_id = :internal_ref and amount_due > 0;
+		
+		 EXEC SQL OPEN my_payments;
+		 EXEC SQL OPEN my_invoice_no;
+		
+		int i = 0;
+		
+		while(num_rows_over_payment > i && num_rows_invoice > i)
+		{
+			 EXEC SQL FETCH my_payments INTO :overPayments.m_payment_id,
+				:overPayments.m_amount, :result_invoice.m_PK_inoice_no;
+
+			  EXEC SQL FETCH my_invoice_no INTO :result_invoice.m_PK_inoice_no, 
+			   :result_invoice.m_inv_amount,
+			   :result_invoice.m_inv_amount_due;
+			   
+				cTrim(result_invoice.m_PK_inoice_no);
+				  cTrim(overPayments.m_payment_id);
+				
+				 delete_from_overpayment(overPayments.m_payment_id);
+				insert_payment_by_invoice(&overPayments, result_invoice.m_PK_inoice_no);
+			  
+				i++;
+		}
+		
+		EXEC SQL CLOSE my_payments;
+		EXEC SQL CLOSE my_invoice_no;
+	}	
+	if(internal_ref == 0)
+	{
+	
+		EXEC SQL BEGIN DECLARE SECTION;
+		int num_rows_over_payment = 0;
+	    int num_rows_invoices = 0;
+		EXEC SQL END DECLARE SECTION;
+		Str_over_payments overPayments;
+		
+		S_Invoices invoice;
+		
+		EXEC SQL DECLARE my_payments1 CURSOR FOR
+		SELECT ov.payment_id, ov.amount, i.customer_id
+		FROM over_payments ov, payments p, invoices i
+		WHERE p.payment_id = ov.original_payment_id and i.inv_no = p.invoice_no
+		and i.amount is not null;
+		
+		EXEC SQL SELECT COUNT(*) INTO :num_rows_over_payment
+		FROM over_payments ov, payments p, invoices i
+		WHERE p.payment_id = ov.original_payment_id and i.inv_no = p.invoice_no
+		and i.amount is not null;
+		
+		int i = 0;
+
+		EXEC SQL OPEN my_payments1;
+	
+	     while(num_rows_over_payment > i )
+	    {
+	
+			EXEC SQL FETCH my_payments1 INTO :overPayments.m_origanl_payment_id,
+			:overPayments.m_amount, :invoice.m_inv_customer_id;
+			
+			cTrim(overPayments.m_origanl_payment_id);
+			
+			EXEC SQL DECLARE my_payments2 CURSOR FOR
+			SELECT inv_no, amount_due, customer_id
+			FROM invoices
+			WHERE customer_id = :invoice.m_inv_customer_id and amount_due > 0;
+			
+			EXEC SQL SELECT COUNT(*) INTO :num_rows_invoices
+			FROM invoices
+			WHERE customer_id = :invoice.m_inv_customer_id and amount_due > 0;
+			
+			int j = 0;
+			EXEC SQL OPEN my_payments2;
+			
+			while(j < num_rows_invoices)
+			{
+				EXEC SQL FETCH my_payments2 INTO :invoice.m_PK_inoice_no, :invoice.m_inv_amount_due, :invoice.m_inv_customer_id;
+				
+				cTrim(invoice.m_PK_inoice_no);
+				
+				delete_from_overpayment(overPayments.m_origanl_payment_id);
+				insert_payment_by_invoice(&overPayments, invoice.m_PK_inoice_no);
+				
+				j++;
+			}
+			EXEC SQL CLOSE my_payments2;
+			
+			i++;
+		}
+		EXEC SQL CLOSE my_payments1;
+	}
+	else
+	{
+	   log_err("The table over_payments is empty or in table invoices there are no invoices to pay\n", e_process_overpayments_err);
+	}
+}

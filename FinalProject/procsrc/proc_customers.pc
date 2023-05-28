@@ -1,0 +1,980 @@
+EXEC SQL INCLUDE proc_customers.h;
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <time.h>
+#include <ctype.h>
+
+
+static int iIsInternalReferenceValid(const char* cInternalReference) 
+{
+	int i = 0;
+	for (; cInternalReference[i]; i++) {
+		if (!isdigit(cInternalReference[i])) {
+			log_err("Internal Reference not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	log_msg("Internal Reference is valid", e_read_lines_err);
+	return 1;
+}
+static int iIsExternalReferenceValid(const char* cExternalReference) 
+{
+	char cExternalRefLetters[4] = "EXT";
+	size_t iNumberOfLetters = 3;
+
+
+	if (strncmp(cExternalReference, cExternalRefLetters, iNumberOfLetters)) 
+	{
+		log_err("Customer External Reference not valid", e_read_lines_err);
+		return 0;
+	}
+	
+	size_t i = iNumberOfLetters;
+	for (; cExternalReference[i]; i++) 
+	{
+		if (!isdigit(cExternalReference[i])) 
+		{
+			log_err("Customer External Reference not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	log_msg("Customer External Reference is valid", e_read_lines);
+	return 1;
+}
+static int iIsCustomerNameValid(const char* cName)
+{
+	int i = 0;
+	for (; cName[i]; i++) 
+	{
+		if (!isalpha(cName[i]) && cName[i] != '-') 
+		{
+			log_err("Customer name not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	log_msg("Customer name is valid", e_read_lines);
+	return 1;
+}
+static int iIsGenderValid(const char* cGender) 
+{
+	if (toupper(cGender[0]) != 'M' && toupper(cGender[0]) != 'F') 
+	{
+		log_err("Gender not valid", e_read_lines_err);
+		return 0;
+	}
+	log_msg("Gender is valid", e_read_lines);
+	return 1;
+}
+static int iIsPlaceNameValid(const char* cPlaceName) 
+{
+	int i = 0;
+	for (; cPlaceName[i]; i++) {
+		if (!isalpha(cPlaceName[i]) && cPlaceName[i] != ' ') 
+		{
+			return 0;
+		}
+	}
+	return 1;
+}
+static int iIsCityValid(const char* cCity) 
+{
+	if (!iIsPlaceNameValid(cCity)) 
+	{
+		log_err("City not valid", e_read_lines_err);
+		return 0;
+	}
+	log_msg("City is valid", e_read_lines);
+	return 1;
+}
+static int iIsCountryValid(const char* cCountry) 
+{
+	if (!iIsPlaceNameValid(cCountry)) 
+	{
+		log_err("Country not valid", e_read_lines_err);
+		return 0;
+	}
+	log_msg("Country is valid", e_read_lines);
+	return 1;
+}
+static int iIsCustomerLimitValid(const char* cCustomerLimit) 
+{
+	int i = 0;
+	for (; cCustomerLimit[i]; i++) 
+	{
+		if (!isdigit(cCustomerLimit[i])) 
+		{
+			log_err("Customer limit not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	log_msg("Customer limit is valid", e_read_lines);
+	return 1;
+}
+static int iFindLastDot(const char* cString) 
+{
+	size_t iStrLenght = strlen(cString);
+	short unsigned int iIndexOfLastDot = 0;
+	int i = 0;
+	for (; i < iStrLenght; i++) 
+	{
+		if (cString[i] == '.') 
+		{
+			iIndexOfLastDot = i;
+		}
+	}
+	return iIndexOfLastDot;
+}
+static int iFindLastAt(const char* cString) 
+{
+	size_t iStrLenght = strlen(cString);
+	short unsigned int iIndexOfLastAt = 0;
+	int i = 0;
+	for (; i < iStrLenght; i++) 
+	{
+		if (cString[i] == '@') 
+		{
+			iIndexOfLastAt = i;
+		}
+	}
+	return iIndexOfLastAt;
+}
+static int iIsThereDotAfterAt(const char* cString) 
+{
+	if (iFindLastAt(cString) < iFindLastDot(cString) && iFindLastAt(cString) > 0) 
+	{
+		return 1;
+	}
+	else 
+	{
+		return 0;
+	}
+}
+static int iIsEmailValid(const char* cEmail) {
+	/*size_t iStrLenght = strlen(cEmail)-1;
+	unsigned short int iRecepientNameMaxLenght = 64;
+	unsigned short int iDomainNameMaxLenght = 253;
+	unsigned short int iCounter = 0;
+
+	if (!iIsThereDotAfterAt(cEmail)) {
+		log_err("Email not valid", e_read_lines_err);
+		return 0;
+	}
+
+	// A special character cannot appear as the first or last character in an email address
+	if (!isalnum(cEmail[0]) || (!isalnum(cEmail[iStrLenght]) && cEmail[iStrLenght] != '\n')) {
+		log_err("Email not valid", e_read_lines_err);
+		return 0;
+	}
+
+	//A special character cannot appear consecutively two or more times
+	int i = 1;
+	for (; i < iStrLenght-1; i++) {
+		if ((!isalnum(cEmail[i]) && !isalnum(cEmail[i - 1])) || cEmail[i] == ' ') {
+		    log_err("Email not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+
+	//The recipient name may be a maximum of 64 characters long
+	for (i = 0; cEmail[i] != '@'; i++) {
+		if (i > iRecepientNameMaxLenght - 1) {
+			log_err("Email not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+
+	//Domain names consist of:
+		//-Uppercase and lowercase letters in English(A - Z, a - z)
+		//-Digits from 0 to 9
+		//-A hyphen(-)
+		//-A period(.)
+
+	for (i = 0; i < iStrLenght-1; i++) {
+		if (cEmail[i] == '@') {
+			iCounter = i + 1;
+			int iLastDotIndex = iFindLastDot(cEmail);
+			for (; iCounter < iLastDotIndex; iCounter++) {
+				if (!isalnum(cEmail[iCounter]) && cEmail[iCounter] != '-' && cEmail[iCounter] != '.') {
+					log_err("Email not valid", e_read_lines_err);
+					return 0;
+				}
+			}
+		}
+	}
+
+	
+	//Top level domain should be at least two letters and only letters
+	//after the last dot
+	
+	int iLastDotIndex = iFindLastDot(cEmail);
+
+	for (; cEmail[iLastDotIndex + 1]; iLastDotIndex++) {
+		iCounter++;
+		if (!isalpha(cEmail[iLastDotIndex + 1])) {
+			if (cEmail[iLastDotIndex + 1] == '\n') {
+				continue;
+			}
+			log_err("Email not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	if (iCounter < 2) {
+		log_err("Email not valid", e_read_lines_err);
+		return 0;
+	}*/
+	log_msg("Email is valid", e_read_lines);
+	return 1;
+}
+////////////////// WRITING TO CUSTOMER DATA STRUCT FUNCTIONS
+
+static int iCorrectOptionalFields(char* cLine) {
+	int iCounter = 0;
+	int iOutcome = 0;
+	int iDoubleSemicolumnIndex = 0;
+
+	size_t iLen = strlen(cLine);//to do
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] == ';' && cLine[i - 1] == ';') {
+
+			iDoubleSemicolumnIndex = iCounter;
+
+			if (iDoubleSemicolumnIndex == 2) {
+				iOutcome += 1;
+			}
+			if (iDoubleSemicolumnIndex == 7) {
+				iOutcome += 2;
+			}
+			if (iDoubleSemicolumnIndex != 2 && iDoubleSemicolumnIndex != 7) {
+				iOutcome += 4;
+			}
+		}
+	}
+	return iOutcome;
+}
+
+static void vFillInternalReference(char* cLine, CustomerData* cdptr, int iOutcome) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	if (iOutcome == 0 || iOutcome == 2) {
+		for (; i < iLen; i++) {
+
+			if (cLine[i] == ';') {
+				iCounter++;
+			}
+			if (cLine[i] != ';' && iCounter == 1) {
+				cdptr->cInternalReference[j] = cLine[i];
+				j++;
+			}
+			if (iCounter == 2) {
+				cdptr->cInternalReference[j] = '\0';
+			}
+		}
+	}
+}
+static void vFillExternalReference(char* cLine, CustomerData* cdptr) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] != ';' && iCounter == 2) {
+			cdptr->cExternalReference[j] = cLine[i];
+			j++;
+		}
+		if (iCounter == 3) {
+			cdptr->cExternalReference[j] = '\0';
+		}
+	}
+}
+static void vFillFirstName(char* cLine, CustomerData* cdptr) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] != ';' && iCounter == 3) {
+			cdptr->cFirstName[j] = cLine[i];
+			j++;
+		}
+		if (iCounter == 4) {
+			cdptr->cFirstName[j] = '\0';
+		}
+	}
+}
+static void vFillLastName(char* cLine, CustomerData* cdptr) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] != ';' && iCounter == 4) {
+			cdptr->cLastName[j] = cLine[i];
+			j++;
+		}
+		if (iCounter == 5) {
+			cdptr->cLastName[j] = '\0';
+		}
+	}
+}
+static void vFillGender(char* cLine, CustomerData* cdptr) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] != ';' && iCounter == 5) {
+			cdptr->cGender[j] = cLine[i];
+			j++;
+		}
+		if (iCounter == 6) {
+			cdptr->cGender[j] = '\0';
+		}
+	}
+}
+static void vFillCity(char* cLine, CustomerData* cdptr, int iOutcome) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	if (iOutcome == 0 || iOutcome == 1) {
+		for (; i < iLen; i++) {
+
+			if (cLine[i] == ';') {
+				iCounter++;
+			}
+			if (cLine[i] != ';' && iCounter == 6) {
+				cdptr->cCity[j] = cLine[i];
+				j++;
+			}
+			if (iCounter == 7) {
+				cdptr->cCity[j] = '\0';
+			}
+		}
+	}
+}
+static void vFillCountry(char* cLine, CustomerData* cdptr) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] != ';' && iCounter == 7) {
+			cdptr->cCountry[j] = cLine[i];
+			j++;
+		}
+		if (iCounter == 8) {
+			cdptr->cCountry[j] = '\0';
+		}
+	}
+}
+static void vFillLimit(char* cLine, CustomerData* cdptr) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] != ';' && iCounter == 8) {
+			cdptr->cCustomerLimit[j] = cLine[i];
+			j++;
+		}
+		if (iCounter == 9) {
+			cdptr->cCustomerLimit[j] = '\0';
+		}
+	}
+}
+static void vFillEmail(char* cLine, CustomerData* cdptr) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	for (; i < iLen; i++) {
+
+		if (cLine[i] == ';') {
+			iCounter++;
+		}
+		if (cLine[i] != ';' && iCounter == 9) {
+			cdptr->cEmail[j] = cLine[i];
+			j++;
+		}
+		cdptr->cEmail[j] = '\0';
+
+	}
+}
+static void vFillEmptyInternalReference(char* cLine, CustomerData* cdptr, int iOutcome) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	if (iOutcome == 1) {
+		for (; i < iLen; i++) {
+
+			if (cLine[i] == ';') {
+				iCounter++;
+			}
+			if (cLine[i] == ';' && iCounter == 1) {
+				cdptr->cInternalReference[j] = '\0';
+			}
+		}
+	}
+}
+static void vFillEmptyCity(char* cLine, CustomerData* cdptr, int iOutcome) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	if (iOutcome == 2) {
+		for (; i < iLen; i++) {
+
+			if (cLine[i] == ';') {
+				iCounter++;
+			}
+			if (cLine[i] == ';' && iCounter == 7) {
+				cdptr->cCity[j] = '\0';
+			}
+		}
+	}
+}
+static void vFillEmptyInternalReferenceAndEmptyCity(char* cLine, CustomerData* cdptr, int iOutcome) {
+	int iCounter = 0;
+	size_t iLen = strlen(cLine);
+	int i = 0;
+	int j = 0;
+	if (iOutcome == 3) {
+		for (; i < iLen; i++) {
+
+			if (cLine[i] == ';') {
+				iCounter++;
+			}
+			if (cLine[i] == ';' && iCounter == 1) {
+				cdptr->cInternalReference[j] = '\0';
+			}
+			if (cLine[i] == ';' && iCounter == 7) {
+				cdptr->cCity[j] = '\0';
+			}
+		}
+	}
+}
+
+static void vFillStructWithEmptyOptionalFields(CustomerData* cdptr, char* cLine, int iOutcome) {
+	//vFillTypeOfLine(cLine, cdptr);
+	vFillInternalReference(cLine, cdptr, iOutcome);
+	vFillExternalReference(cLine, cdptr);
+	vFillFirstName(cLine, cdptr);
+	vFillLastName(cLine, cdptr);
+	vFillGender(cLine, cdptr);
+	vFillCity(cLine, cdptr, iOutcome);
+	vFillCountry(cLine, cdptr);
+	vFillLimit(cLine, cdptr);
+	vFillEmail(cLine, cdptr);
+
+	vFillEmptyCity(cLine, cdptr, iOutcome);
+	vFillEmptyInternalReference(cLine, cdptr, iOutcome);
+	vFillEmptyInternalReferenceAndEmptyCity(cLine, cdptr, iOutcome);
+}
+
+
+//***************************************************NON STATIC FUNCTIONS****************************************************************************//
+int iIsSecondFiedlEmpty(const char* cLine)
+{
+	int iCounter = 0;
+	int iDoubleSemicolumnIndex = 0;
+
+	size_t iLen = strlen(cLine);//to do
+	int i = 0;
+	for (; i < iLen; i++) 
+	{
+		if (cLine[i] == ';') 
+		{
+			iCounter++;
+		}
+		if (cLine[i] == ';' && cLine[i - 1] == ';') 
+		{
+			iDoubleSemicolumnIndex = iCounter;
+
+			if (iDoubleSemicolumnIndex == 2) 
+			{
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+char* cReadCustomerDataFormFile(FILE* fptr, CustomerData* customer,const char* buffer) {
+
+	//vReadFile_fscanf(fptr, cLine);
+	int iOptionalFields = iCorrectOptionalFields(buffer);
+
+	if (iOptionalFields == NoEmptyOptionalFields)
+	{
+		//iFillStructWithRegEx(fptr, cdptr);
+		int n = sscanf(buffer, "%2[^;];%20[^;];%60[^;];%60[^;];%60[^;];%1[^;];%50[^;];%30[^;];%10[^;];%50[^\n]",
+			customer->cTypeOfLine, customer->cInternalReference, customer->cExternalReference,
+			customer->cFirstName, customer->cLastName, customer->cGender, customer->cCity, customer->cCountry, customer->cCustomerLimit,
+			customer->cEmail);
+	}
+	else if (iOptionalFields > NoEmptyOptionalFields && iOptionalFields < EmptyInternalReferenceAndCity)
+	{
+		vFillStructWithEmptyOptionalFields(customer, buffer, iOptionalFields);
+	}
+	else {
+		// write cLine in .KO
+	}
+
+	return buffer;
+};
+int iIsCustomerInfoFormatValid(const char* cLine) {
+	int iFieldCounter = 1;
+	int iFieldTypeSymbolCounter = 0;
+	int iInternalReferenceSymbolCounter = 0;
+	int iExternalReferenceSymbolCounter = 0;
+	int iFirstNameSymbolCounter = 0;
+	int iLastNameSymbolCounter = 0;
+	int iGenderSymbolCounter = 0;
+	int iCitySymbolCounter = 0;
+	int iCountrySymbolCounter = 0;
+	int iCustomerLimitSymbolCounter = 0;
+	int iEmailSymbolCounter = 0;
+
+	size_t iLen = strlen(cLine);
+	int i = 0;
+
+	for (; i < iLen; i++) {
+		if (cLine[i] == ';') {
+			iFieldCounter++;
+		}
+		if (iFieldCounter == TypeOfLine) {
+			iFieldTypeSymbolCounter++;
+		}
+		if (iFieldCounter == TypeOfLine && iFieldTypeSymbolCounter > TYPE_OF_LINE_MAX_LEN) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == InternalReference) {
+			iInternalReferenceSymbolCounter++;
+		}
+		if (iFieldCounter == InternalReference && iInternalReferenceSymbolCounter > INTERNAL_REF_MAX_LEN) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == ExternalReference) {
+			iExternalReferenceSymbolCounter++;
+		}
+		if (iFieldCounter == ExternalReference && iExternalReferenceSymbolCounter > EXTERNAL_REF_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == FirstName) {
+			iFirstNameSymbolCounter++;
+		}
+		if (iFieldCounter == FirstName && iFirstNameSymbolCounter > NAME_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == LastName) {
+			iLastNameSymbolCounter++;
+		}
+		if (iFieldCounter == LastName && iLastNameSymbolCounter > NAME_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == Gender) {
+			iGenderSymbolCounter++;
+		}
+		if (iFieldCounter == Gender && iGenderSymbolCounter > GENDER_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == City) {
+			iCitySymbolCounter++;
+		}
+		if (iFieldCounter == City && iCitySymbolCounter > CITY_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == Country) {
+			iCountrySymbolCounter++;
+		}
+		if (iFieldCounter == Country && iCountrySymbolCounter > COUNTRY_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == CustomerLimit) {
+			iCustomerLimitSymbolCounter++;
+		}
+		if (iFieldCounter == CustomerLimit && iCustomerLimitSymbolCounter > CUSTOMER_LIMIT_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+		if (iFieldCounter == Email) {
+			iEmailSymbolCounter++;
+		}
+		if (iFieldCounter == Email && iEmailSymbolCounter > EMAIL_MAX_LEN + 1) {
+			log_err("Customer info format not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	log_msg("Customer info format is valid", e_read_lines);
+	return 1;
+};
+int iIsCustomerDataValid(const CustomerData* cdptr) {
+	return
+		(
+			iIsInternalReferenceValid(cdptr->cInternalReference) &&
+			iIsExternalReferenceValid(cdptr->cExternalReference) &&
+			iIsCustomerNameValid(cdptr->cFirstName) &&
+			iIsCustomerNameValid(cdptr->cLastName) &&
+			iIsGenderValid(cdptr->cGender) &&
+			iIsCityValid(cdptr->cCity) &&
+			iIsCountryValid(cdptr->cCountry) &&
+			iIsCustomerLimitValid(cdptr->cCustomerLimit) &&
+			iIsEmailValid(cdptr->cEmail)
+			);
+}
+
+//**********************************************************Pro*C FUNCTIONS**************************************************************************//
+
+int sql_find_external_reference(char* ext_ref)  
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    int idCustomer=0;
+	EXEC SQL END DECLARE SECTION;
+	
+	cTrim(ext_ref);
+	
+	EXEC SQL SELECT CUSTOMER_ID INTO : idCustomer
+		FROM CUSTOMERS
+		WHERE EXTERNAL_REFERENCE = : ext_ref;
+	 
+	if (idCustomer != 0)
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+int sql_find_internal_reference(int internal_ref)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+    int idCustomer=0;
+	EXEC SQL END DECLARE SECTION;
+	
+	EXEC SQL SELECT CUSTOMER_ID INTO : idCustomer
+		FROM CUSTOMERS
+		WHERE CUSTOMER_ID = : internal_ref;
+
+	if (idCustomer != 0)
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+
+	}
+}
+
+int sql_compare_data_customer_in_line_by_internal_referance(const CustomerData* lineCustomer, int internal_ref)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    CustomerData customer={0};
+	EXEC SQL END DECLARE SECTION;
+	
+	EXEC SQL SELECT CUSTOMER_ID, 
+		FIRST_NAME, 
+		FAMILY_NAME, 
+		SEX, 
+		ADR_CITY, 
+		ADR_COUNTRY, 
+		CREDIT_LIMIT, 
+		EMAIL, 
+		EXTERNAL_REFERENCE 
+		INTO : customer.cInternalReference, 
+		: customer.cFirstName, 
+		: customer.cLastName, 
+		: customer.cGender, 
+		: customer.cCity, 
+		: customer.cCountry, 
+		: customer.cCustomerLimit, 
+		: customer.cEmail, 
+		: customer.cExternalReference
+		FROM CUSTOMERS
+		WHERE CUSTOMER_ID = : internal_ref;
+
+
+	cTrim(customer.cInternalReference);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cInternalReference, customer.cInternalReference));
+	if (strcmp(lineCustomer->cInternalReference, customer.cInternalReference) != 0)
+	{
+		return 0;
+	}
+	
+	cTrim(customer.cCustomerLimit);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cCustomerLimit, customer.cCustomerLimit));
+	if (strcmp(lineCustomer->cCustomerLimit, customer.cCustomerLimit) != 0)
+	{
+		return 0;
+	}
+	
+	cTrim(customer.cFirstName);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cFirstName, customer.cFirstName));
+	if (strcmp(lineCustomer->cFirstName, customer.cFirstName) != 0)
+	{
+		return 0;
+	}
+	
+	cTrim(customer.cLastName);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cLastName, customer.cLastName));
+	if (strcmp(lineCustomer->cLastName, customer.cLastName) != 0)
+	{
+		return 0;
+	}
+
+	cTrim(customer.cGender);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cGender, customer.cGender));
+	if (strcmp(lineCustomer->cGender, customer.cGender) != 0)
+	{
+		return 0;
+	}
+
+	cTrim(customer.cCity);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cCity, customer.cCity));
+	if (strcmp(lineCustomer->cCity, customer.cCity) != 0)
+	{
+		return 0;
+	}
+
+	cTrim(customer.cCountry);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cCountry, customer.cCountry));
+	if (strcmp(lineCustomer->cCountry, customer.cCountry) != 0)
+	{
+		return 0;
+	}
+
+	cTrim(customer.cEmail);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cEmail, customer.cEmail));
+	if (strcmp(lineCustomer->cEmail, customer.cEmail) != 0)
+	{
+		return 0;
+	}
+
+	cTrim(customer.cExternalReference);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cExternalReference, customer.cExternalReference));
+	if (strcmp(lineCustomer->cExternalReference, customer.cExternalReference) != 0)
+	{
+		return 0;
+	}
+
+	return 1;
+
+}
+int sql_compare_data_customer_in_line_by_external_referance(const CustomerData* lineCustomer, char* external_ref)
+{
+	
+	EXEC SQL BEGIN DECLARE SECTION;
+    CustomerData customer={0};
+	EXEC SQL END DECLARE SECTION;
+	
+    cTrim(external_ref);
+	EXEC SQL SELECT CUSTOMER_ID, FIRST_NAME, FAMILY_NAME, SEX, ADR_CITY, ADR_COUNTRY, CREDIT_LIMIT, EMAIL INTO 
+	: customer.cInternalReference, 
+	: customer.cFirstName, 
+	: customer.cLastName, 
+	: customer.cGender, 
+	: customer.cCity, 
+	: customer.cCountry, 
+	: customer.cCustomerLimit, 
+	: customer.cEmail
+		FROM CUSTOMERS
+		WHERE EXTERNAL_REFERENCE = : external_ref;
+
+
+	if (lineCustomer->cInternalReference != customer.cInternalReference)
+	{
+		return 0;
+	}
+
+    cTrim(customer.cFirstName);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cFirstName, customer.cFirstName));
+	if (strcmp(lineCustomer->cFirstName, customer.cFirstName) != 0)
+	{
+		return 0;
+	}
+	cTrim(customer.cLastName);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cLastName, customer.cLastName));
+	if (strcmp(lineCustomer->cLastName, customer.cLastName) != 0)
+	{
+		return 0;
+	}
+	cTrim(customer.cGender);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cGender, customer.cGender));
+	if (strcmp(lineCustomer->cGender, customer.cGender) != 0)
+	{
+		return 0;
+	}
+    cTrim(customer.cCity);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cCity, customer.cCity));
+	if (strcmp(lineCustomer->cCity, customer.cCity) != 0)
+	{
+		return 0;
+	}
+    cTrim(customer.cCountry);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cCountry, customer.cCountry));
+	if (strcmp(lineCustomer->cCountry, customer.cCountry) != 0)
+	{
+		return 0;
+	}
+	if (lineCustomer->cCustomerLimit != customer.cCustomerLimit)
+	{
+		return 0;
+	}
+	cTrim(customer.cEmail);
+	//printf("Result from compare is : %d\n", strcmp(lineCustomer->cEmail, customer.cEmail));
+	if (strcmp(lineCustomer->cEmail, customer.cEmail) != 0)
+	{
+		return 0;
+	}
+
+	return 1;
+
+}
+
+void sql_update_table_customers_by_internal_referance(const CustomerData* lineCustomer, int internal_ref)
+{
+    char cErrorMessage[96] = { "Error updating customer data" };
+	
+	EXEC SQL WHENEVER SQLERROR do sql_error(cErrorMessage);
+	
+	EXEC SQL UPDATE CUSTOMERS SET
+		FIRST_NAME = :lineCustomer->cFirstName,
+		FAMILY_NAME = : lineCustomer->cLastName,
+		SEX = : lineCustomer->cGender,
+		ADR_CITY = : lineCustomer->cCity,
+		ADR_COUNTRY = : lineCustomer->cCountry,
+		CREDIT_LIMIT = : lineCustomer->cCustomerLimit,
+		EMAIL = : lineCustomer->cEmail,
+		EXTERNAL_REFERENCE = : lineCustomer->cExternalReference
+		WHERE CUSTOMER_ID = : internal_ref;
+}
+void sql_update_table_customers_by_external_referance(const CustomerData* lineCustomer, char* external_ref)
+{
+	char cErrorMessage[96] = { "Error updating customer data" };
+	cTrim(external_ref);
+	
+	EXEC SQL WHENEVER SQLERROR do sql_error(cErrorMessage);
+	
+	EXEC SQL UPDATE CUSTOMERS SET
+		FIRST_NAME = :lineCustomer->cFirstName,
+		FAMILY_NAME = : lineCustomer->cLastName,
+		SEX = : lineCustomer->cGender,
+		ADR_CITY = : lineCustomer->cCity,
+		ADR_COUNTRY = : lineCustomer->cCountry,
+		CREDIT_LIMIT = : lineCustomer->cCustomerLimit,
+		EMAIL = : lineCustomer->cEmail
+		WHERE EXTERNAL_REFERENCE = : external_ref;
+}
+
+void sql_insert_row_in_table_customers_by_external_referance(const CustomerData* lineCustomer, char* external_ref)
+{
+	char cErrorMessage[96] = { "Error inserting data into customer" };
+	
+	EXEC SQL WHENEVER SQLERROR do sql_error(cErrorMessage);
+	
+	EXEC SQL INSERT INTO CUSTOMERS
+	(CUSTOMER_ID, 
+		FIRST_NAME, 
+		FAMILY_NAME, 
+		SEX, ADR_CITY, 
+		ADR_COUNTRY, 
+		CREDIT_LIMIT, 
+		EMAIL, 
+		EXTERNAL_REFERENCE) 
+		VALUES
+	(:lineCustomer->cInternalReference, 
+		: lineCustomer->cFirstName, 
+		: lineCustomer->cLastName, 
+		: lineCustomer->cGender, 
+		: lineCustomer->cCity, 
+		: lineCustomer->cCountry, 
+		: lineCustomer->cCustomerLimit, 
+		: lineCustomer->cEmail, 
+		: lineCustomer->cExternalReference);
+}
+
+int line_processing_customer(char* buffer, const CustomerData* lineCustomer, FILE*  fp_incorrect_output)
+{
+	if(iIsSecondFiedlEmpty(buffer)) 
+	{	
+	    int internal_ref=atoi(lineCustomer->cInternalReference);
+		if(sql_find_internal_reference(internal_ref))
+		{
+		   if(!sql_compare_data_customer_in_line_by_internal_referance(lineCustomer, internal_ref))  
+		   { 
+			 sql_update_table_customers_by_internal_referance(lineCustomer, internal_ref);
+			 log_msg("Update customer by internal ref!\n", e_read_lines);
+			 return 1;
+		   }
+		}
+		else
+		{
+			log_err("Customer with this id does not exist.\n", e_read_lines_err);
+            fputs(buffer, fp_incorrect_output);
+			return 0;
+		}
+	}
+	else
+	{
+		if(sql_find_external_reference(lineCustomer->cExternalReference))
+		{
+			if(!sql_compare_data_customer_in_line_by_external_referance(lineCustomer, lineCustomer->cExternalReference))
+			{
+			  sql_update_table_customers_by_external_referance(lineCustomer, lineCustomer->cExternalReference);
+			  log_msg("Update customer by external ref!\n", e_read_lines);
+			}
+		}
+		else
+		{
+		   sql_insert_row_in_table_customers_by_external_referance(lineCustomer, lineCustomer->cExternalReference);
+		   log_msg("Insert customer by external ref!\n", e_read_lines);
+		}
+
+    }
+	return 1;
+}
+

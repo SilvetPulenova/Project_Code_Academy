@@ -1,0 +1,156 @@
+EXEC SQL INCLUDE report.h;
+EXEC SQL INCLUDE helper_functions.h;
+#include <stdio.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <time.h>
+
+
+static void generate_report_by_customer(FILE* fp, int customer_id_input) 
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    char inv_no[50]={0};
+    float amount=0.0f;
+    float amount_due=0.0f;
+    char currency[4]={0};
+    char issue_date[11]={0};
+    char due_date[11]={0};
+    int num_rows=0;
+    char paid_ind[9] = ""; 
+    EXEC SQL END DECLARE SECTION;
+
+    EXEC SQL DECLARE c_invoices CURSOR FOR
+    SELECT inv_no, amount, amount_due, currency, issue_date, due_date
+    FROM invoices
+    WHERE customer_id = :customer_id_input;
+
+    EXEC SQL SELECT COUNT(*) INTO :num_rows FROM invoices WHERE customer_id = :customer_id_input;
+
+    EXEC SQL OPEN c_invoices;
+      
+    while (num_rows>0) 
+    {
+        EXEC SQL FETCH c_invoices INTO :inv_no, :amount, :amount_due, :currency, :issue_date, :due_date;
+		if (sqlca.sqlcode == 100) 
+        {
+            break;
+        }
+		if (amount_due <= 0.0f)
+		{
+			strncpy(paid_ind, "paid", sizeof(paid_ind)-1);
+		}
+		else
+		{
+			strncpy(paid_ind, "notpaid", sizeof(paid_ind)-1);
+		}
+		cTrim(inv_no);
+		fprintf(fp, "%s, %.2f, %.2f, %s, %s, %s, %s\n", inv_no, amount, amount_due, currency, issue_date, due_date, paid_ind);
+		num_rows--; 
+    }
+
+    EXEC SQL CLOSE c_invoices;
+}
+
+static void generate_report_by_period(FILE* fp, char* date_from, char* date_to) 
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    char first_name[61]={0};
+    char family_name[61]={0};
+    char external_reference[61]={0};
+    int customer_id=0;
+	int num_rows=0;
+    EXEC SQL END DECLARE SECTION;
+    
+    EXEC SQL DECLARE c_customers CURSOR FOR
+        SELECT  c.customer_id, c.first_name, c.family_name, c.external_reference
+        FROM customers c
+        WHERE c.customer_id NOT IN 
+            (SELECT DISTINCT i.customer_id 
+             FROM invoices i 
+             WHERE i.inv_no IN 
+                 (SELECT DISTINCT p.invoice_no 
+                  FROM payments p 
+                  WHERE p.payment_dt BETWEEN TO_DATE(:date_from, 'YYYY-MM-DD') AND TO_DATE(:date_to, 'YYYY-MM-DD')));
+    
+    EXEC SQL OPEN c_customers;
+
+    EXEC SQL SELECT COUNT(*) INTO :num_rows FROM customers c WHERE c.customer_id NOT IN 
+            (SELECT DISTINCT i.customer_id 
+             FROM invoices i 
+             WHERE i.inv_no IN 
+                 (SELECT DISTINCT p.invoice_no 
+                  FROM payments p 
+                  WHERE p.payment_dt BETWEEN TO_DATE(:date_from, 'YYYY-MM-DD') AND TO_DATE(:date_to, 'YYYY-MM-DD')));
+
+    while (num_rows>0) 
+    {
+        EXEC SQL FETCH c_customers INTO :customer_id, :first_name, :family_name, :external_reference;
+        if (sqlca.sqlcode == 100) 
+        {
+            break;
+        }
+		cTrim(first_name);
+		cTrim(family_name);
+        fprintf(fp, "%d, %s, %s, %s\n", customer_id, first_name, family_name, external_reference);
+        num_rows--;
+    }
+
+    EXEC SQL CLOSE c_customers;
+}
+void generate_report(char* parameter)
+{
+    FILE* fp;
+    char filename[] = "report.txt";
+    
+    fp = fopen(filename, "w");
+    if(fp==NULL)
+    {
+        log_err("Error opening file report!\n", e_report_err);
+        return;
+    }
+    
+    if (strcmp(parameter, "client") == 0) 
+    {
+        int customer_id;
+		
+		printf("Generate report by customer\n");
+        printf("Enter customer ID: ");
+        scanf("%d", &customer_id);
+        
+        generate_report_by_customer(fp, customer_id); 
+        
+        log_msg("Report generated and saved to file\n", e_report);
+    }
+    else if (strcmp(parameter, "period") == 0) 
+    {
+        //char date_from[11] = "2022-09-01";
+        //char date_to[11] = "2023-02-01
+		
+		char date_from[11] = {0};
+        char date_to[11] = {0};
+		
+		printf("Generate report by period\n");
+		printf("Enter date from(YYYY-MM-DD):");
+		scanf("%s", &date_from);
+		printf("Enter date to(YYYY-MM-DD):");
+		scanf("%s", &date_to);
+		
+        generate_report_by_period(fp, date_from, date_to); 
+
+		log_msg("Report generated and saved to file\n", e_report);
+    }
+    else 
+    {
+        log_err("Invalid parameter, report can not be generated\n", e_report_err);
+    }
+	
+    fclose(fp);
+}
+
+
+
+
+

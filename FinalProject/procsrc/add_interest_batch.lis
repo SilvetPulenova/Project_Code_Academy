@@ -1,0 +1,10 @@
+
+Pro*C/C++: Release 19.0.0.0.0 - Production on Sun Mar 19 16:20:59 2023
+Version 19.3.0.0.0
+
+Copyright (c) 1982, 2019, Oracle and/or its affiliates.  All rights reserved.
+
+Error at line 31, column 20 in file procsrc/add_interest_batch.pc
+    31                  EXEC SQL DECLARE c_invoices CURSOR FOR
+    31  ...................1
+    31  PCC-W-02332, attempted to redefine SQL identifier

@@ -1,0 +1,153 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include"ReadLines.h"
+#include<string.h>
+#include<ctype.h>
+#include<stdlib.h>
+#include<stdio.h>
+
+void readLinePayment(FILE* fp_input, FILE* fp_incorrect_output, FILE* fp_correct_output, PaymentData* payment, char* buffer)
+{
+    if (isPaymentInfoFormatValid(buffer))
+    {
+        int n = sscanf(buffer, "%2[^;];%60[^;];%8[^;];%13[^;];%10[^;];%3[^\n]",
+            payment->cTypeOfLine, payment->cExternalReference, payment->cPaymentDate,
+            payment->cPaymentSum, payment->cPaymentMethod, payment->cPaymentCurrency);
+
+        if (isPaymentInfoDataValid(payment))
+        {
+			log_msg("Every field in payment line is valid!", e_read_lines);
+            if (line_processing_payment(payment,  fp_incorrect_output))//pro*C function
+            {
+                fprintf(fp_correct_output, "%s;%s;%s;%s;%s;%s", payment->cTypeOfLine, payment->cExternalReference, payment->cPaymentDate, payment->cPaymentSum, payment->cPaymentMethod, payment->cPaymentCurrency);
+				
+                if (doesLineEndWithSemicolon(buffer))
+                {
+                    fprintf(fp_correct_output, ";");
+                }
+                fprintf(fp_correct_output, "\n");
+            }
+        }
+        else
+        {
+			log_err("Payment line is not valid!\n", e_read_lines_err);
+            fprintf(fp_incorrect_output, "%s;%s;%s;%s;%s;%s\n", payment->cTypeOfLine, payment->cExternalReference,
+                payment->cPaymentDate, payment->cPaymentSum, payment->cPaymentMethod,
+                payment->cPaymentCurrency);
+        }
+    }
+    else
+    {
+		log_err("Payment line is incorrect! Saving to output.KO\n", e_read_lines_err);
+        fputs(buffer, fp_incorrect_output);
+    }
+}
+void readLineInvoice(FILE* fp_input, FILE*  fp_incorrect_output, FILE* fp_correct_output, InvoiceData* invoice, char* buffer)
+{
+    if (isInvoiceInfoFormatValid(buffer))
+    {
+        int n = sscanf(buffer, "%2[^;];%60[^;];%8[^;];%13[^;];%3[^\n]",
+            invoice->cTypeOfLine, invoice->cExternalReference, invoice->cInvoiceDate,
+            invoice->cInvoiceSum, invoice->cInvoiceCurrency);
+
+        if (isInvoiceInfoDataValid(invoice))
+        {
+			log_msg("Every field in invoice line is valid!", e_read_lines);
+            if (line_processing_invoice(invoice,  fp_incorrect_output)) //pro*C function
+            {
+                fprintf(fp_correct_output, "%s;%s;%s;%s;%s\n", invoice->cTypeOfLine, invoice->cExternalReference, invoice->cInvoiceDate,
+                    invoice->cInvoiceSum, invoice->cInvoiceCurrency);
+            }
+        }
+        else
+        {
+		    log_err("Invoice line is not valid!\n", e_read_lines_err);
+            fprintf(fp_incorrect_output, "%s;%s;%s;%s;%s\n", invoice->cTypeOfLine, invoice->cExternalReference, invoice->cInvoiceDate,
+                invoice->cInvoiceSum, invoice->cInvoiceCurrency);
+        }
+    }
+    else
+    {
+	    log_err("Invoice line is incorrect! Saving to output.KO\n", e_read_lines_err);
+        fputs(buffer, fp_incorrect_output);
+    }
+}
+void readLineCustomer(FILE* fp_input, FILE*  fp_incorrect_output, FILE* fp_correct_output, CustomerData* customer, char* buffer)
+{
+   
+    if (iIsCustomerInfoFormatValid(buffer))
+    {
+        cReadCustomerDataFormFile(fp_input, customer, buffer);
+
+        if (iIsCustomerDataValid(customer))
+        {
+			log_msg("Every field in customer line is valid!", e_read_lines);
+            if (line_processing_customer(buffer, customer,  fp_incorrect_output)) //pro*C function
+            {
+                fprintf(fp_correct_output, "01;%s;%s;%s;%s;%s;%s;%s;%s;%s", customer->cInternalReference, customer->cExternalReference, customer->cFirstName, customer->cLastName, customer->cGender, customer->cCity, customer->cCountry, customer->cCustomerLimit, customer->cEmail);
+            }
+        }
+        else
+        {
+			log_err("Customer line is not valid!\n", e_read_lines_err);
+            fprintf(fp_incorrect_output, "01;%s;%s;%s;%s;%s;%s;%s;%s;%s",customer->cInternalReference, customer->cExternalReference,
+                customer->cFirstName, customer->cLastName, customer->cGender, customer->cCity, customer->cCountry, customer->cCustomerLimit,
+                customer->cEmail);
+        }
+    }
+    else
+    {
+		log_err("Line is incorrect! Saving to output.KO\n", e_read_lines_err);
+        fputs(buffer, fp_incorrect_output);
+    }
+}
+void readLines(FILE* fp_input, FILE* fp_incorrect_output, FILE* fp_correct_output)
+{
+    char buffer[MAX_LINE_LENGTH]={0};
+	/*char *buffer = (char*)malloc(MAX_LINE_LENGTH * sizeof(char));
+		if(buffer == NULL) 
+		{
+		   printf("Error allocate memory.");
+		}*/
+
+		PaymentData payment = {0};
+		CustomerData customer = {0};
+		InvoiceData invoice = {0};
+			
+
+		while (fgets(buffer, MAX_LINE_LENGTH, fp_input) != NULL)
+		{
+		if (strncmp(CUSTOMER_TYPE_LINE, buffer, 2) == 0)
+		{
+			readLineCustomer(fp_input, fp_incorrect_output, fp_correct_output, &customer, buffer);
+		}
+		else if (strncmp(INVOICE_TYPE_LINE, buffer, 2) == 0)
+		{
+			readLineInvoice(fp_input, fp_incorrect_output, fp_correct_output, &invoice, buffer);
+		}
+		else if (strncmp(PAYMENT_TYPE_LINE, buffer, 2) == 0)
+		{
+			readLinePayment(fp_input, fp_incorrect_output, fp_correct_output, &payment, buffer);
+		}
+		else
+		{
+			log_err("Incorrect line!\n", e_read_lines_err);
+			fputs(buffer, fp_incorrect_output);
+		}
+
+		
+		/*if (strlen(buffer) == MAX_LINE_LENGTH - 1) {
+			char *temp = (char*)realloc(buffer, 2 * MAX_LINE_LENGTH * sizeof(char));
+			if(temp == NULL) {
+				// handle memory allocation error
+			} else {
+				buffer = temp;
+			}
+		}*/
+		}
+
+		//free(buffer);
+
+}
+
+
+

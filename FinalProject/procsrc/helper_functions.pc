@@ -1,0 +1,351 @@
+
+#include"helper_functions.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <time.h>
+
+FILE* fp_file_manager=NULL;
+FILE* fp_file_manager_err=NULL;
+
+FILE* fp_read_lines=NULL;
+FILE* fp_read_lines_err=NULL;
+
+FILE* fp_report=NULL;
+FILE* fp_report_err=NULL;
+
+FILE* fp_add_interest=NULL;
+FILE* fp_add_interest_err=NULL;
+
+FILE* fp_process_overpayments=NULL;
+FILE* fp_process_overpayments_err=NULL;
+
+
+void openFile(FILE** fp, char* fileName, char* mode)
+{
+    *fp = fopen(fileName, mode);	 
+	if(*fp==NULL)
+	{
+	  printf("Cannot open %s\n", fileName);
+	}
+}
+
+void open_log_files()
+{
+	openFile(&fp_file_manager, "LOGS/file_manager.log", "a");
+	openFile(&fp_file_manager_err, "LOGS/file_manager_err.log", "a");
+	
+	openFile(&fp_read_lines, "LOGS/read_lines.log", "a");
+	openFile(&fp_read_lines_err, "LOGS/read_lines_err.log", "a");
+	
+	openFile(&fp_report, "LOGS/report.log", "a");
+	openFile(&fp_report_err, "LOGS/report_err.log", "a");
+	
+	openFile(&fp_add_interest, "LOGS/add_interest.log", "a");
+	openFile(&fp_add_interest_err, "LOGS/add_interest_err.log", "a");
+	
+	openFile(&fp_process_overpayments, "LOGS/process_overpayments.log", "a");
+	openFile(&fp_process_overpayments_err, "LOGS/process_overpayments_err.log", "a");
+}
+void close_log_files()
+{
+	fclose(fp_file_manager);
+	fclose(fp_file_manager_err);
+
+	fclose(fp_read_lines);
+	fclose(fp_read_lines_err);
+
+	fclose(fp_report);
+	fclose(fp_report_err);
+
+	fclose(fp_add_interest);
+	fclose(fp_add_interest_err);
+
+	fclose(fp_process_overpayments);
+	fclose(fp_process_overpayments_err);
+}
+
+static void log_msg_manager(const char* cMessage , file_name file, int b_error_format)
+{
+    FILE* fptr = NULL;
+    char cBuffer[20] = { 0 };
+	struct tm* sTm;
+	time_t now = time(0);
+	sTm = gmtime(&now);
+
+	if (sTm->tm_hour == 22) 
+	{
+		sTm->tm_hour = 0;
+	}
+	else if (sTm->tm_hour == 23) 
+	{
+		sTm->tm_hour = 1;
+	}
+	else {
+		sTm->tm_hour += 2;
+	}
+	
+	switch(file)
+	{
+	   case 1:  
+			fptr = fp_file_manager;
+			break;
+	   case 2: 
+	         fptr = fp_file_manager_err;
+			 break;
+	   case 3: 
+	         fptr = fp_read_lines;
+			 break;
+	   case 4: 
+	         fptr = fp_read_lines_err;
+			 break;
+	   case 5: 
+	         fptr = fp_report;
+			 break;
+	   case 6: 
+	         fptr = fp_report_err;
+			 break;
+	   case 7: 
+	         fptr = fp_add_interest;
+			 break;
+	   case 8: 
+	         fptr = fp_add_interest_err;
+			 break;
+	   case 9: 
+	         fptr = fp_process_overpayments;
+			 break;
+	   case 10: 
+	         fptr = fp_process_overpayments_err;
+			 break;
+	}
+
+    strftime(cBuffer, sizeof(cBuffer), "%Y-%m-%d %H:%M:%S", sTm);
+	fprintf(fptr, b_error_format?"[MSG] [%s] %s\n":"[ERROR] [%s] %s\n",  cBuffer, cMessage);
+}
+void log_err(const char* cMessage , file_name file)
+{
+   log_msg_manager(cMessage ,file, 0);
+}
+void log_msg(const char* cMessage , file_name file)
+{
+   log_msg_manager(cMessage ,file, 1);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+char *my_itoa(int num, char *str)
+{
+        if(str == NULL)
+        {
+                return NULL;
+        }
+        sprintf(str, "%d", num);
+        return str;
+}
+int return_customerId(char* external_ref)
+{
+    int customer_id=0;
+	EXEC SQL WHENEVER SQLERROR do sql_error("Error find customer_id\n");
+	
+    EXEC SQL SELECT customer_id INTO :customer_id
+        FROM customers
+        WHERE external_reference = :external_ref;
+    return customer_id;
+}
+char* cTrim(char* cString)
+{
+	size_t tLength = strlen(cString);
+	size_t i = 0;
+	for (i = tLength-1; i > 0; i--) {
+		if (cString[i] != ' ') {
+			break;
+		}
+		if (cString[i] == ' ') {
+			cString[i] = '\0';
+		}
+	}
+	return cString;
+}
+void convert_date(char date_str[], char formatted_date[]) 
+{
+    if (strlen(date_str) != 8) 
+	{
+        sprintf(formatted_date, "Incorect date format");
+        return;
+    }
+
+    char day[3], month[3], year[5];
+    strncpy(day, date_str, 2);
+    day[2] = '\0';
+    strncpy(month, date_str + 2, 2);
+    month[2] = '\0';
+    strncpy(year, date_str + 4, 4);
+    year[4] = '\0';
+
+    sprintf(formatted_date, "%s-%s-%s", year, month, day);
+}
+void sql_error(char* msg) {
+
+	char buf[BUFSIZE] = { 0 };
+	size_t buflen = 0; size_t msglen = 0;
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+	EXEC SQL ROLLBACK WORK RELEASE;
+	buflen = sizeof(buf);
+	sqlglm(buf, &buflen, &msglen);
+	printf("%s: ", msg);
+	
+	buf[msglen] = 0;
+	printf("%s\n", buf);
+	exit(1);
+}
+
+void exec_commit() 
+{
+	EXEC SQL WHENEVER SQLERROR do sql_error("Oracle error");
+
+	EXEC SQL COMMIT;
+}
+
+//Verification date
+int isDateValid(char* cInvoiceDate)
+{
+	int iDay = iConvertDateDayToInt(cInvoiceDate);
+	int iMonth = iConvertDateMonthToInt(cInvoiceDate);
+	int iYear = iConvertDateYearToInt(cInvoiceDate);
+
+
+	if (!isDateDayValid(iDay))
+	{
+		log_err("Date day not valid", e_read_lines_err);
+		log_err("Date day not valid",e_read_lines_err);
+		return 0;
+	}
+	else if (!isDateMonthValid(iMonth))
+	{
+		log_err("Date month not valid", e_read_lines_err);
+		log_err("Date month not valid", e_read_lines_err);
+		return 0;
+	}
+	else if (!isDateYearValid(iYear))
+	{
+		log_err("Date year not valid", e_read_lines_err);
+		log_err("Date year not valid", e_read_lines_err);
+		return 0;
+	}
+	else if ((iMonth == 4 || iMonth == 6 || iMonth == 9 || iMonth == 11)
+		&& iDay == 31)
+	{
+		log_err("Date day/month not valid", e_read_lines_err);
+		log_err("Date day/month not valid", e_read_lines_err);
+		return 0;
+	}
+	else if (iMonth == 2)
+	{
+		if (iYear % 4 != 0 && iDay > 28)
+		{
+			log_err("Date day/month not valid", e_read_lines_err);
+			log_err("Date day/month not valid", e_read_lines_err);
+			return 0;
+		}
+		else if (iYear % 4 == 0 && iDay > 29)
+		{
+			log_err("Date day/month not valid", e_read_lines_err);
+			log_err("Date day/month not valid", e_read_lines_err);
+			return 0;
+		}
+		else 
+		{
+		    return 1;
+		}
+	}
+	else
+	{
+		log_msg("Date is valid", e_read_lines);
+		return 1;
+	}
+}
+int isDateDayValid(int iDateDay)
+{
+	if (iDateDay > 0 && iDateDay < 32)
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+int isDateMonthValid(int iDateMonth)
+{
+	if (iDateMonth > 0 && iDateMonth < 13)
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+int isDateYearValid(int iDateYear)
+{
+	if (iDateYear > 1976 && iDateYear < 2099)
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+int iConvertDateDayToInt(const char* cInvoiceDate)
+{
+	char cInvoiceDateDay[3] = { '0' };
+	int iDateDay = 0;
+	int iDateDayLenght = 2;
+	int i;
+	for (i = 0; i < iDateDayLenght; i++)
+	{
+		cInvoiceDateDay[i] = cInvoiceDate[i];
+	}
+
+	iDateDay = atoi(cInvoiceDateDay);
+	return iDateDay;
+}
+int iConvertDateMonthToInt(const char* cInvoiceDate)
+{
+	char cInvoiceDateMonth[3] = { '0' };
+	int iDateMonth = 0;
+	int iDateMonthStart = 2;
+	int iDateYearStart = 4;
+	int i = iDateMonthStart;
+	int j = 0;
+	for (; i < iDateYearStart; i++, j++)
+	{
+		cInvoiceDateMonth[j] = cInvoiceDate[i];
+	}
+
+	iDateMonth = atoi(cInvoiceDateMonth);
+	return iDateMonth;
+}
+int iConvertDateYearToInt(const char* cInvoiceDate)
+{
+	char cInvoiceDateYear[5] = { '0' };
+	int iDateYear = 0;
+	int iDateYearStart = 4;
+	int iDateEnd = 8;
+	int i = iDateYearStart;
+	int j = 0;
+
+	for (; i < iDateEnd; i++, j++)
+	{
+		cInvoiceDateYear[j] = cInvoiceDate[i];
+	}
+
+	iDateYear = atoi(cInvoiceDateYear);
+	return iDateYear;
+}
+
+

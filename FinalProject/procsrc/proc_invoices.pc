@@ -1,0 +1,251 @@
+#define _CRT_SECURE_NO_WARNINGS
+EXEC SQL INCLUDE proc_invoices.h;
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <ctype.h>
+
+int isInvoiceInfoFormatValid(const char* line) 
+{
+    size_t len=strlen(line)-1;
+	int i = 0;
+	int count = 0;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count != 2) //first field
+	{
+		log_err("Invoice format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count < 4 || count > 60) //second field
+	{
+	    log_err("Invoice format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count != 8)//third field
+	{
+		log_err("Invoice format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count < 1 || count > 13)//fourth field
+	{
+		log_err("Invoice format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (i<len-1) //sixth field
+	{
+		++count;
+		i++;
+	}
+	if(count!=3) // additional check to make sure count is exactly 3
+	{
+		log_err("Invoice format not valid", e_read_lines_err);
+		return 0;
+	}
+	log_msg("Invoice format is valid", e_read_lines);
+	
+	return 1;
+}
+int isInvoiceInfoDataValid(const InvoiceData* invoiceData)
+{
+	int i;
+	for (i = 0; i < strlen(invoiceData->cExternalReference); i++)
+	{
+		if (!isalnum(invoiceData->cExternalReference[i]))
+		{
+			log_err("Invoice External Reference not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	for (i = 0; i < strlen(invoiceData->cInvoiceDate); i++)
+	{
+		if (!isdigit(invoiceData->cInvoiceDate[i]))
+		{
+			log_err("Invoice date not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	if (!isDateValid(invoiceData->cInvoiceDate))
+	{
+		return 0;
+	}
+	int decimalCount = 0;
+	int digitsAfterDecimal = 0;
+	for (i = 0; i < strlen(invoiceData->cInvoiceSum); i++)
+	{
+		if (!isdigit(invoiceData->cInvoiceSum[i]) && invoiceData->cInvoiceSum[i] != '.')
+		{
+			log_err("Invoice sum not valid", e_read_lines_err);
+			return 0;
+		}
+		if (invoiceData->cInvoiceSum[i] == '.')
+		{
+			decimalCount++;
+		}
+		else if (decimalCount > 0)
+		{
+			digitsAfterDecimal++;
+		}
+		if (decimalCount > 1 || digitsAfterDecimal > 2)
+		{
+			log_err("Invoice sum not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	int result =strcmp(invoiceData->cInvoiceCurrency, "BGN");
+	if(result!=0)
+	{
+	    log_err("Invoice currency not valid", e_read_lines_err);
+		return 0;
+	}
+	log_msg("Invoice data is valid", e_read_lines);
+	
+	return 1;
+}
+
+//*************************************************************Pro*C FUNCTION*********************************************************************
+int sql_fetch_invoice_sequence(char* external_ref)
+{	
+    EXEC SQL BEGIN DECLARE SECTION;
+    int seq_invoice=0;
+	int num_internal_referance=0;
+    EXEC SQL END DECLARE SECTION;
+	
+	num_internal_referance=return_customerId(external_ref);
+   
+	//char cErrorMessage[96] = { "Error finding invoice seq" };
+	
+	//EXEC SQL WHENEVER SQLERROR do sql_error(cErrorMessage); 
+
+    EXEC SQL SELECT MAX(SEQ), CUSTOMER_ID INTO :seq_invoice  
+    FROM INVOICES
+    WHERE CUSTOMER_ID=:num_internal_referance
+    GROUP BY CUSTOMER_ID;
+  
+    return seq_invoice;
+}
+
+void sql_insert_row_in_table_invoices_by_external_referance(const InvoiceData* lineInvoice)
+{
+  EXEC SQL BEGIN DECLARE SECTION;
+    int seq_invoice=0;
+	int num_internal_referance=0;
+	char inv_number[20]={0};
+	char internal_ref[20]={0};
+	char char_seq[11]={0};
+	char newdate[11]={0};
+	double amount=0.0;
+  EXEC SQL END DECLARE SECTION;
+ 
+  num_internal_referance=return_customerId(lineInvoice->cExternalReference);
+  
+  seq_invoice=sql_fetch_invoice_sequence(lineInvoice->cExternalReference);
+
+  my_itoa(num_internal_referance, internal_ref);
+  strcpy(inv_number, internal_ref);
+  strcat(inv_number, "_");
+ 
+  seq_invoice++;
+  
+  my_itoa(seq_invoice, char_seq);
+  
+  strcat(inv_number, char_seq);
+  strcat(inv_number, "_");
+  strcat(inv_number, lineInvoice->cInvoiceDate);
+
+  cTrim(lineInvoice->cInvoiceDate);
+  convert_date(lineInvoice->cInvoiceDate, newdate);
+  
+  char *ptr=NULL;
+ 
+  amount=strtod(lineInvoice->cInvoiceSum, &ptr);
+  //printf("My amount is %.2lf", amount);
+  
+  //char* date1="2023-03-08";
+  
+  char cErrorMessage[96] = { "Error insert invoice by external_ref" };
+	
+  EXEC SQL WHENEVER SQLERROR do sql_error(cErrorMessage);
+  
+  EXEC SQL INSERT INTO INVOICES
+	(INV_NO, 
+		AMOUNT,  
+		CURRENCY, 
+		ISSUE_DATE,
+		CUSTOMER_ID,
+		SEQ) 
+		VALUES
+	(:inv_number, 
+		: amount, 
+		: lineInvoice->cInvoiceCurrency, 
+		to_date(:newdate, 'yyyy-mm-dd'),
+		: num_internal_referance,
+		: seq_invoice);
+		
+  
+}
+void fetch_last_invoice_no(char* my_inv_no, int max_seq, int internal_ref)
+{
+   EXEC SQL BEGIN DECLARE SECTION;
+   char inv_no[60]={0};
+   EXEC SQL END DECLARE SECTION;
+   
+   char cErrorMessage[96] = { "Error finding last invoice" };
+	
+   //EXEC SQL WHENEVER SQLERROR do sql_error(cErrorMessage);
+   
+   EXEC SQL SELECT inv_no INTO :inv_no
+   FROM INVOICES
+   WHERE seq=: max_seq and customer_id=: internal_ref;
+   
+   cTrim(inv_no);
+   
+   strcpy(my_inv_no, inv_no);
+}
+int line_processing_invoice(const InvoiceData* lineInvoice, FILE* fp_incorrect_output)
+{
+  if(sql_find_external_reference(lineInvoice->cExternalReference))
+  {
+     sql_insert_row_in_table_invoices_by_external_referance(lineInvoice);
+	 log_msg("Insert invoice by external ref!\n", e_read_lines);
+	 return 1;
+  }
+  else
+  {
+	  log_err("Invoice for a non-existent customer.\n", e_read_lines_err);
+      fprintf(fp_incorrect_output, "02;%s;%s;%s;%s\n", /*lineInvoice->cTypeOfLine,*/lineInvoice->cExternalReference, lineInvoice->cInvoiceDate, lineInvoice->cInvoiceSum, lineInvoice->cInvoiceCurrency);
+	  return 0;
+  }
+}
+
+
+

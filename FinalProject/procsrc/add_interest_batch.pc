@@ -1,0 +1,157 @@
+EXEC SQL INCLUDE add_interest_batch.h;
+#include"helper_functions.h"
+#include "proc_invoices.h"
+#include"proc_customers.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <time.h>
+
+void add_interest(char* external_ref)
+{
+	int num_rows=0;
+	int customer_id_input=0; 
+	customer_id_input = return_customerId(external_ref);
+	
+	if(customer_id_input>0)
+	{
+		EXEC SQL DECLARE c_invoices CURSOR FOR
+		SELECT inv_no, amount, amount_due, TO_CHAR(issue_date, 'YYYY-MM-DD'), TO_CHAR(due_date, 'YYYY-MM-DD'), customer_id, seq
+		FROM invoices
+		WHERE customer_id = :customer_id_input AND amount_due > 0 AND sysdate-5>due_date AND original_invoice_id is NULL;
+
+		EXEC SQL SELECT COUNT(*) INTO :num_rows FROM invoices 
+		WHERE customer_id = : customer_id_input and  amount_due > 0 AND sysdate-5>due_date AND original_invoice_id is NULL;
+	}
+	else if(customer_id_input==0)
+	{  
+	    //add constraint
+		EXEC SQL DECLARE c_invoices CURSOR FOR
+		SELECT inv_no, amount, amount_due, TO_CHAR(issue_date, 'YYYY-MM-DD'), TO_CHAR(due_date, 'YYYY-MM-DD'), customer_id, seq
+		FROM invoices
+		WHERE amount_due > 0 AND sysdate-5>due_date AND original_invoice_id is NULL;
+
+		//constraint
+		num_rows=10;
+	}
+	else
+	{
+	    log_err("There are no invoices to add interest to\n", e_add_interest_err);
+	}
+	
+	EXEC SQL OPEN c_invoices;
+	
+    int i=0;
+	Invoices invoice={0};
+	
+    while (i<num_rows)
+    {	
+        EXEC SQL FETCH c_invoices INTO :invoice.m_PK_inoice_no, :invoice.m_inv_amount, :invoice.m_inv_amount_due, :invoice.m_issue_dt,
+		:invoice.m_due_dt, :invoice.m_customer_id, :invoice.m_seq;
+		
+		insert_interest_invoice(&invoice);
+		
+        i++;
+    }
+    EXEC SQL CLOSE c_invoices;
+}
+void insert_interest_invoice(Invoices* invoice)
+{
+  int seq_invoice=sql_fetch_invoice_sequence_by_customer_id(invoice->m_customer_id)+1;
+ 
+  addDays(invoice->m_due_dt, 5);
+  
+  char inv_number[50]={0};
+  char char_customer_id[11]={0};
+
+  my_itoa(invoice->m_customer_id, char_customer_id);
+ 
+  strcpy(inv_number, char_customer_id);
+  
+  strcat(inv_number, "_");
+  char char_seq[20]={0};
+  my_itoa(seq_invoice, char_seq);
+  strcat(inv_number, char_seq);
+  strcat(inv_number, "_");
+  
+  char due_date[9]={0};
+  removeSymbol(invoice->m_due_dt, due_date, '-');
+  due_date[9]='\0';
+  strcat(inv_number, due_date);
+	
+  double interest_amount=invoice->m_inv_amount_due*0.05;
+ 
+  char currency[4]={"BGN"};
+ 
+  //EXEC SQL WHENEVER SQLERROR do print_error("Error inserting interest!\n");
+  
+  EXEC SQL INSERT INTO INVOICES
+	(   INV_NO,
+		AMOUNT,
+		AMOUNT_DUE,
+		CURRENCY,
+		ISSUE_DATE,
+		CUSTOMER_ID,
+		SEQ,
+		ORIGINAL_INVOICE_ID)
+		VALUES
+	(   :inv_number,
+		: interest_amount,
+		: interest_amount,
+		: currency,
+		to_date(:invoice->m_due_dt, 'yyyy-mm-dd'),
+		: invoice->m_customer_id,
+		: seq_invoice,
+		:invoice->m_PK_inoice_no);
+		
+	log_msg("Interest invoice is inserted\n", e_add_interest);
+}
+void removeSymbol(char* str, char* new_str, char symbol)
+{
+	int i=0;
+	int j=0;
+	while(str[i])
+	{
+	  if(str[i]!=symbol)
+	  {
+		new_str[j]=str[i];
+		j++;
+	  }
+	  i++;
+	}
+}
+
+void addDays(char m_due_dt[], int daysToAdd) 
+{
+    struct tm dueDate = {0};
+  
+    sscanf(m_due_dt, "%d-%d-%d", &dueDate.tm_year, &dueDate.tm_mon, &dueDate.tm_mday);
+  
+    dueDate.tm_year -= 1900;
+  
+    dueDate.tm_mon -= 1;
+    
+    time_t dueDateTimestamp = mktime(&dueDate);
+   
+    time_t newDateTimestamp = dueDateTimestamp + (daysToAdd * 86400);
+    
+    struct tm *newDate = localtime(&newDateTimestamp);
+   
+    sprintf(m_due_dt, "%04d-%02d-%02d", newDate->tm_year + 1900, newDate->tm_mon + 1, newDate->tm_mday);
+}
+
+int sql_fetch_invoice_sequence_by_customer_id(int customer_id)
+{
+    int seq = 0;
+	EXEC SQL WHENEVER SQLERROR do sql_error("Error fetch seq from invoices!\n");
+	
+    EXEC SQL SELECT MAX(seq) INTO :seq
+        FROM invoices
+        WHERE customer_id = :customer_id;
+    return seq;
+}
+
+
+

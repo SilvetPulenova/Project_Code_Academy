@@ -1,0 +1,172 @@
+#include"FileManager.h"
+#include"ReadLines.h"
+#include "helper_functions.h"
+#include"Validation_filename.h"
+#include<stdio.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+char* path = "/home/oracle/ShareProC/testCode2";
+char* myPath = "/home/oracle/ShareProC/testCode2/";
+char* pathDirOK = "/home/oracle/ShareProC/testCode2/OK/";
+char* pathDirKO = "/home/oracle/ShareProC/testCode2/KO/";
+char* pathDirBACK = "/home/oracle/ShareProC/testCode2/BACK/";
+
+static int compare(const void* a, const void* b)
+{
+    struct dirent** ia = (struct dirent**)a;
+    struct dirent** ib = (struct dirent**)b;
+    return strcmp((*ia)->d_name, (*ib)->d_name);
+}
+static void createDir(const char* dir_path)
+{
+    int result = mkdir(dir_path, 0777); 
+    if (result == -1) 
+	{
+        printf("Error creating directory\n");
+        return;
+    }
+}
+static void renameAndMoveFile(char* newPath, char* oldPath, char* filename, const char* extention)
+{
+	char NewName[150] = { '\0' };
+	strcpy(NewName, filename);
+	strtok(NewName, ".");
+	strcat(NewName, ".");
+	strcat(NewName, extention);
+	char old[250]={'\0'};
+	char new[250]={'\0'};
+	strcat(old,oldPath);
+	strcat(new, newPath);
+	strcat(old,NewName);
+	strcat(new, NewName);
+	
+	int result1 = rename(filename, NewName);
+	if (result1 != 0)
+	{
+		log_err("The file could not be renamed.\n",e_file_manager_err);
+	}
+    int result2 = rename(old, new);
+	if (result2 != 0)
+	{
+		log_err("The file could not be moved.\n",e_file_manager_err);
+	}
+}
+static void createFileWithNewExtention(char* newPath, char* oldPath, const char* fileName, const char* extention)
+{
+	FILE *fp;
+	char newPathFile[150]={0};
+	char oldPathFile[150]={0};
+	char NewName[150] = {0};
+	
+	changeExtention(fileName, NewName,extention);
+    strcat(newPathFile, newPath);
+	strcat(oldPathFile, oldPath);
+	strcat(newPathFile, NewName);
+	strcat(oldPathFile, NewName);
+	
+    fp = fopen(oldPathFile, "w");
+    if (fp == NULL) 
+	{
+		log_err("Error creating file\n",e_file_manager_err);
+        return;
+    }
+	else 
+	{
+	    log_msg("File is created!\n", e_file_manager);
+	}
+	
+    fclose(fp);
+
+	int result1 = rename(oldPathFile, newPathFile);
+	if (result1 != 0)
+	{
+	    log_err("The file could not be renamed.\n", e_file_manager_err);
+	}
+}
+void changeExtention(char* fileName, char* newFileName, char* extention)
+{
+	strcpy(newFileName,fileName);
+	strtok(newFileName,"txt");
+	strcat(newFileName, extention);
+}
+void changeExtentionAndPath(char* fileName,char* newPathFile, char* extention, char* path)
+{
+	char newName[40]={"\0"};
+	strcpy(newPathFile,path);
+	changeExtention(fileName, newName, extention);
+	strcat(newPathFile, newName);
+}
+void createDirs()
+{
+    createDir("/home/oracle/ShareProC/testCode2/OK");
+    createDir("/home/oracle/ShareProC/testCode2/KO");
+    createDir("/home/oracle/ShareProC/testCode2/BACK");
+	createDir("/home/oracle/ShareProC/testCode2/LOGS");
+}
+
+void scanDir() 
+{	
+    struct dirent** files;
+    int count, i;
+
+    count = scandir(path, &files, NULL, alphasort);
+    if (count < 0)
+    {
+		log_err("Cannot open directory\n", e_file_manager_err);
+        return;
+    }
+ 
+	FILE* fp_input;
+	FILE* fp_incorrect_output;
+    FILE* fp_correct_output;
+	
+    for (i = 0; i < count; i++)
+    {
+		if (isFilenameValid(files[i]->d_name))
+		{ 
+			log_msg("Filename is valid\n", e_file_manager);
+	
+	        createFileWithNewExtention( pathDirOK , myPath ,files[i]->d_name,"OK");
+			createFileWithNewExtention( pathDirKO , myPath ,files[i]->d_name,"KO");
+			
+			char newPathFile[100]={0};
+			char newPathFile1[100]={0};
+		
+			changeExtentionAndPath(files[i]->d_name, newPathFile,"OK", pathDirOK);
+			
+			changeExtentionAndPath(files[i]->d_name, newPathFile1,"KO", pathDirKO);
+			
+			 fp_incorrect_output = fopen(newPathFile1, "w");
+		     fp_correct_output = fopen(newPathFile, "w");
+			 fp_input = fopen(files[i]->d_name, "r");
+			 
+			if (fp_incorrect_output == NULL || fp_correct_output == NULL || fp_input == NULL)
+			{
+			   log_err("Error opening file\n", e_file_manager_err);
+			   return;
+			}
+			
+			readLines(fp_input, fp_incorrect_output, fp_correct_output);
+			
+			fclose(fp_input);
+			
+			renameAndMoveFile(pathDirBACK, myPath ,files[i]->d_name,"back");
+			
+			fclose(fp_incorrect_output);
+		    fclose(fp_correct_output);
+		}
+		else
+		{
+			printf("%s\n", files[i]->d_name);
+			log_err("Filename is not valid!!!\n", e_file_manager_err);
+		}
+
+        free(files[i]);
+    }
+	
+    free(files);
+}

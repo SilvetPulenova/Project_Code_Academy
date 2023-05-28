@@ -1,0 +1,226 @@
+#define _CRT_SECURE_NO_WARNINGS
+EXEC SQL INCLUDE proc_payment.h;
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <sqlcpr.h>
+#include <ctype.h>
+
+
+int doesLineEndWithSemicolon(const char* line)
+{
+	size_t len = strlen(line);
+	return (line[len - 1] == ';');
+}
+
+int isPaymentInfoFormatValid(const char* line)
+{
+    size_t len=strlen(line)-1;
+	int i = 0;
+	int count = 0;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count != 2) //first field
+	{
+		log_err("Payment format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count < 4 || count > 60) //second field
+	{
+	    log_err("Payment format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count != 8)//third field
+	{
+		log_err("Payment format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count < 1 || count > 13)//fourth field
+	{
+		log_err("Payment format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (line[i] != ';')
+	{
+		count++;
+		i++;
+	}
+	if (count < 1 || count > 10)//fifth field
+	{
+		log_err("Payment format not valid", e_read_lines_err);
+		return 0;
+	}
+	count = 0;
+	i++;
+	while (i<len-1) //sixth field
+	{
+		++count;
+		i++;
+	}
+	if(count!=3) // additional check to make sure count is exactly 3
+	{
+		log_err("Payment format not valid", e_read_lines_err);
+		return 0;
+	}
+	log_msg("Payment format is valid", e_read_lines);
+	return 1;
+}
+int isPaymentInfoDataValid(const PaymentData* paymentData)
+{
+	int i;
+	for (i = 0; i < strlen(paymentData->cExternalReference); i++)
+	{
+		if (!isalnum(paymentData->cExternalReference[i]))
+		{
+			log_err("Payment External Reference not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	for (i = 0; i < strlen(paymentData->cPaymentDate); i++)
+	{
+		if (!isdigit(paymentData->cPaymentDate[i]))
+		{
+			log_err("Payment date not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	if (!isDateValid(paymentData->cPaymentDate))
+	{
+		log_err("Payment date not valid", e_read_lines_err);
+		return 0;
+	}
+	int decimalCount = 0;
+	int digitsAfterDecimal = 0;
+	for (i = 0; i < strlen(paymentData->cPaymentSum); i++)
+	{
+		if (!isdigit(paymentData->cPaymentSum[i]) && paymentData->cPaymentSum[i] != '.')
+		{
+			log_err("Payment sum not valid", e_read_lines_err);
+			return 0;
+		}
+		if (paymentData->cPaymentSum[i] == '.')
+		{
+			decimalCount++;
+		}
+		else if (decimalCount > 0)
+		{
+			digitsAfterDecimal++;
+		}
+		if (decimalCount > 1 || digitsAfterDecimal > 2)
+		{
+			log_err("Payment sum not valid", e_read_lines_err);
+			return 0;
+		}
+	}
+	int result =strcmp(paymentData->cPaymentCurrency, "BGN");
+	if(result!=0)
+	{
+		log_err("Payment currency not valid", e_read_lines_err);
+		return 0;
+	}
+	log_msg("Payment data is valid", e_read_lines);
+	
+	return 1;
+}
+
+//********************************************************Pro*C FUNCTION*****************************************************************************//
+
+void sql_insert_row_in_table_payment_by_external_referance(const PaymentData* linePayment, char* inv_number)
+{
+  EXEC SQL BEGIN DECLARE SECTION;
+  char seq_payment[20]={0};
+  double my_sum=0.0;
+  char newdate[11]={0};
+  EXEC SQL END DECLARE SECTION;
+  
+  EXEC SQL SELECT payments_seq.nextval INTO :seq_payment FROM dual;
+  cTrim(seq_payment);
+  
+  char *ptr=NULL;
+  my_sum = strtod(linePayment->cPaymentSum, &ptr);
+  
+  convert_date(linePayment->cPaymentDate, newdate);
+  
+  char cErrorMessage[96] = { "Error insert payment by external referance" };
+
+  EXEC SQL WHENEVER SQLERROR do sql_error(cErrorMessage);
+  
+  EXEC SQL INSERT INTO PAYMENTS
+	(INVOICE_NO, 
+	    PAYMENT_ID,
+		PAYMENT_DT,
+		AMOUNT,
+        PAYMENT_METHOD,		
+		CURRENCY) 
+		VALUES
+	(:inv_number,
+        :seq_payment, 
+		to_date(:newdate, 'yyyy-mm-dd'),
+		:my_sum,
+		:linePayment->cPaymentMethod,
+		:linePayment->cPaymentCurrency);
+  
+}
+int line_processing_payment(const PaymentData* linePayment, FILE* fp_incorrect_output)
+{
+  if(sql_find_external_reference(linePayment->cExternalReference))
+  {     
+        EXEC SQL BEGIN DECLARE SECTION;
+    	char inv_no[50]={0};
+		EXEC SQL END DECLARE SECTION;
+		
+		int max_seq=sql_fetch_invoice_sequence(linePayment->cExternalReference);
+		
+		if(max_seq > 0)
+		{
+		    int internal_ref=return_customerId(linePayment->cExternalReference);
+			fetch_last_invoice_no(inv_no, max_seq, internal_ref);
+			
+			sql_insert_row_in_table_payment_by_external_referance(linePayment, inv_no);
+			log_msg("Insert payment by external ref!\n", e_read_lines);
+			return 1;
+		}
+		else
+		{
+			 log_err("Reject the line!\n", e_read_lines_err);
+			 fprintf(fp_incorrect_output, "03;%s;%s;%s;%s;%s\n", /*linePayment->cTypeOfLine,*/ linePayment->cExternalReference, linePayment->cPaymentDate, linePayment->cPaymentSum, linePayment->cPaymentMethod, linePayment->cPaymentCurrency);
+			 return 0;
+		}
+  }
+  else
+  {
+	 log_err("Payment from a non-existent customer.\n", e_read_lines_err);
+     fprintf(fp_incorrect_output, "03;%s;%s;%s;%s;%s\n", /*linePayment->cTypeOfLine,*/ linePayment->cExternalReference, linePayment->cPaymentDate, linePayment->cPaymentSum, linePayment->cPaymentMethod, linePayment->cPaymentCurrency);
+	 return 0;
+  }
+}
+
